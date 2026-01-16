@@ -284,6 +284,7 @@
         </label>
         <button class="btn" id="btnReset">Reset</button>
         <button class="btn" id="btnCSV">Descargar CSV (filtrado)</button>
+        <button class="btn" id="btnXLS">Descargar Excel (incrementos)</button>
       </div>
       <div class="small" style="margin-top: 10px;">
         Tip: da clic en encabezados para ordenar. Puedes filtrar por texto y por “solo ↑”. El CSV respeta filtros.
@@ -324,6 +325,14 @@
         </div>
       </div>
     </div>
+
+
+    <div class="card" style="grid-column: span 12;">
+      <div class="section-title">Recomendaciones e incrementos</div>
+      <div class="small" style="margin-top:6px;">Se actualiza con los filtros actuales. El botón de Excel descarga solo renglones con incrementos (Δ Costo &gt; 0 o Δ PMP &gt; 0) e incluye recomendación por renglón.</div>
+      <div id="recs" style="margin-top:12px;"></div>
+    </div>
+
   </div>
 
   <div class="footer">
@@ -431,6 +440,185 @@ function downloadCSV(rows) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function rowRecommendation(r) {
+  const costPct = safeNumber(r.Costo_pct_vs_2026);
+  const pmpPct  = safeNumber(r.PMP_pct_vs_2026);
+  const costDiff = safeNumber(r.Costo_diff);
+  const pmpDiff  = safeNumber(r.PMP_diff);
+  const mBase = safeNumber(r.Margen_Base);
+  const m2026 = safeNumber(r.Margen_2026);
+
+  // Reglas simples y accionables (puedo ajustarlas a tu criterio)
+  if (costDiff !== null && costDiff > 0 && (pmpDiff === null || pmpDiff <= 0)) {
+    return "Riesgo de margen: costo ↑ con PMP no ↑. Revisar precio/proveedor.";
+  }
+  if (mBase !== null && m2026 !== null && (mBase - m2026) < -0.05) {
+    return "Margen peor vs 2026 (>5 pp): revisar estrategia.";
+  }
+  if (costPct !== null && costPct >= 0.15 && (pmpPct === null || pmpPct < 0.05)) {
+    return "Negociar costo (↑ fuerte) o buscar alternativa.";
+  }
+  if (costDiff !== null && costDiff < 0 && (pmpDiff !== null && pmpDiff >= 0)) {
+    return "Oportunidad: costo ↓ y PMP estable/↑.";
+  }
+  if (costDiff !== null && costDiff > 0 && (pmpDiff !== null && pmpDiff > 0)) {
+    return "Costo y PMP ↑: validar contrato y plan de compras.";
+  }
+  return "—";
+}
+
+function downloadExcelIncrementos(rows) {
+  const inc = rows.filter(r => {
+    const cd = safeNumber(r.Costo_diff);
+    const pd = safeNumber(r.PMP_diff);
+    return (cd !== null && cd > 0) || (pd !== null && pd > 0);
+  });
+
+  const cols = [
+    ["EAN", "EAN"],
+    ["Articulo", "Artículo"],
+    ["Costo_Base", "Costo Base"],
+    ["Costo_2026", "Costo 2026"],
+    ["Costo_diff", "Δ Costo"],
+    ["Costo_pct_vs_2026", "% Δ Costo"],
+    ["PMP_Base", "PMP Base"],
+    ["PMP_2026", "PMP 2026"],
+    ["PMP_diff", "Δ PMP"],
+    ["PMP_pct_vs_2026", "% Δ PMP"],
+    ["Margen_Base", "Margen Base"],
+    ["Margen_2026", "Margen 2026"],
+    ["Rec", "Recomendación"],
+  ];
+
+  const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
+  const body = inc.map(r => {
+    const cells = cols.map(([key]) => {
+      let v;
+      if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
+            else v = r[key];
+      // Normaliza números para que Excel los lea bien
+      const n = safeNumber(v);
+      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026")) {
+        return `<td style="mso-number-format:'0.00';">${n}</td>`;
+      }
+      return `<td>${escHtml(v)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("\n");
+
+  const htmlXls = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
+    <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+  </body></html>`;
+
+  const blob = new Blob([htmlXls], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "incrementos_filtrados.xls";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderRecommendations(rows) {
+  const el = document.getElementById("recs");
+  if (!el) return;
+
+  if (!rows || rows.length === 0) {
+    el.innerHTML = `<div class="small">No hay datos con los filtros actuales.</div>`;
+    return;
+  }
+
+  const costUp = rows.filter(r => {
+    const cd = safeNumber(r.Costo_diff);
+    return cd !== null && cd > 0;
+  });
+  const pmpUp = rows.filter(r => {
+    const pd = safeNumber(r.PMP_diff);
+    return pd !== null && pd > 0;
+  });
+  const incAny = rows.filter(r => {
+    const cd = safeNumber(r.Costo_diff);
+    const pd = safeNumber(r.PMP_diff);
+    return (cd !== null && cd > 0) || (pd !== null && pd > 0);
+  });
+
+  // Riesgo: costo ↑ y PMP no ↑ (o baja)
+  const marginRisk = rows.filter(r => {
+    const cd = safeNumber(r.Costo_diff);
+    const pd = safeNumber(r.PMP_diff);
+    return (cd !== null && cd > 0) && (pd === null || pd <= 0);
+  });
+
+  const topCostPct = rows
+    .filter(r => safeNumber(r.Costo_pct_vs_2026) !== null)
+    .slice()
+    .sort((a,b) => safeNumber(b.Costo_pct_vs_2026) - safeNumber(a.Costo_pct_vs_2026))
+    .slice(0, 8);
+
+  const topPmpPct = rows
+    .filter(r => safeNumber(r.PMP_pct_vs_2026) !== null)
+    .slice()
+    .sort((a,b) => safeNumber(b.PMP_pct_vs_2026) - safeNumber(a.PMP_pct_vs_2026))
+    .slice(0, 8);
+
+  const worstMargin = rows
+    .filter(r => safeNumber(r.Margen_Base) !== null && safeNumber(r.Margen_2026) !== null)
+    .slice()
+    .sort((a,b) => (safeNumber(a.Margen_Base)-safeNumber(a.Margen_2026)) - (safeNumber(b.Margen_Base)-safeNumber(b.Margen_2026)))
+    .slice(0, 8);
+
+  const li = (r, kind) => {
+    const name = escHtml(text(r.Articulo));
+    if (kind === "cost") return `<li>${name} — <span class="tag-warn">${pct(r.Costo_pct_vs_2026)}</span> (${money(r.Costo_diff)})</li>`;
+    if (kind === "pmp") return `<li>${name} — <span class="tag-warn">${pct(r.PMP_pct_vs_2026)}</span> (${money(r.PMP_diff)})</li>`;
+    const dm = (safeNumber(r.Margen_Base) - safeNumber(r.Margen_2026));
+    const dmTxt = (dm === null) ? "—" : (dm*100).toFixed(2) + " pp";
+    return `<li>${name} — <span class="tag-warn">${dmTxt}</span></li>`;
+  };
+
+  el.innerHTML = `
+    <div class="small" style="margin-bottom:10px;">
+      <span class="chip">Filtrados: <b>${rows.length}</b></span>
+      <span class="chip">Incrementos (costo o PMP): <b>${incAny.length}</b></span>
+      <span class="chip">Costo ↑: <b>${costUp.length}</b></span>
+      <span class="chip">PMP ↑: <b>${pmpUp.length}</b></span>
+      <span class="chip">Riesgo margen: <b>${marginRisk.length}</b></span>
+    </div>
+
+    <div class="two">
+      <div>
+        <div class="small"><b>Top incrementos de Costo (%):</b></div>
+        <ol class="list">${topCostPct.map(r => li(r, "cost")).join("")}</ol>
+      </div>
+      <div>
+        <div class="small"><b>Top incrementos de PMP (%):</b></div>
+        <ol class="list">${topPmpPct.map(r => li(r, "pmp")).join("")}</ol>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;">
+      <div class="small"><b>Peor margen (Base vs 2026):</b> (si quieres, lo cambio a $ de utilidad)</div>
+      <ol class="list">${worstMargin.map(r => li(r, "margin")).join("")}</ol>
+    </div>
+
+    <div class="small" style="margin-top:10px; opacity:.9;">
+      Sugerencia: usa filtros (ej. “Solo costo ↑” + “Mín % costo ↑”) y luego descarga el Excel de incrementos.
+    </div>
+  `;
 }
 
 let table = null;
@@ -566,6 +754,7 @@ function applyFilters() {
   if (table) {
     table.setFilter((data) => rowMatchesFilter(data, filters));
   }
+  renderRecommendations(filteredData(filters));
   return filters;
 }
 
@@ -584,6 +773,11 @@ function wireUI() {
   document.getElementById("btnCSV").addEventListener("click", () => {
     const filters = applyFilters();
     downloadCSV(filteredData(filters));
+  });
+
+  document.getElementById("btnXLS").addEventListener("click", () => {
+    const filters = applyFilters();
+    downloadExcelIncrementos(filteredData(filters));
   });
 }
 
