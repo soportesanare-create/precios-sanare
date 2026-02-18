@@ -1,0 +1,17 @@
+{
+  "generated_from": "precios_febrero.xlsx",
+  "sources": [
+    {
+      "label": "MEDMONT FEB",
+      "file": "./data/medmont_feb.json"
+    },
+    {
+      "label": "NADRO FEB",
+      "file": "./data/nadro_feb.json"
+    },
+    {
+      "label": "MEDPHARMA FEB",
+      "file": "./data/medpharma_feb.json"
+    }
+  ]
+}

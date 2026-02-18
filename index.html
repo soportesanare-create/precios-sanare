@@ -14,6 +14,7 @@
   <!-- Tabulator (tabla interactiva) -->
   <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
   <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.20.2/dist/xlsx.full.min.js"></script>
 
   <style>
     :root {
@@ -229,17 +230,51 @@
   }
   .tabulator .tabulator-paginator button:hover { background: rgba(168,85,247,.18) !important; }
   .tabulator .tabulator-paginator label { color: rgba(255,255,255,.70) !important; }
+
+/* --- NUEVO: selector de laboratorio (fuente de comparación) --- */
+.sub{ position: relative; padding-right: 360px; }
+.labbox{
+  position:absolute; right:0; top:0;
+  display:flex; gap:10px; align-items:center;
+  padding:10px 12px; border-radius:14px;
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.12);
+  backdrop-filter: blur(10px);
+}
+.labbox label{ font-size: 12px; opacity:.9; }
+.labbox select{
+  background: rgba(255,255,255,.08);
+  color: white;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 12px;
+  padding: 8px 10px;
+  outline:none;
+}
+.labbox .hint{ font-size: 11px; opacity:.75; max-width: 220px; }
+@media (max-width: 980px){
+  .sub{ padding-right: 0; }
+  .labbox{ position: static; margin-top: 10px; }
+}
+
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Análisis interactivo – Costos y PMP (Base) vs columnas 2026</h1>
+  <h1>Análisis interactivo – Costos y PMP (Base) vs columnas <span id="labelComp">2026</span></h1>
   <div class="sub">
-    Este reporte compara <b>COSTO MAXIMO</b> vs <b>Cruce costo (2026)</b> y <b>PMP BASE</b> vs <b>Cruce PMP (2026)</b>.
+    Este reporte compara <b>COSTO MAXIMO</b> vs <b>Cruce costo (<span id="labelComp2">2026</span>)</b> y <b>PMP BASE</b> vs <b>Cruce PMP (<span id="labelComp3">2026</span>)</b>.
     <br/>
-    Interpretación usada: <b>“Elevación”</b> = <span class="chip">Base − 2026</span> (positivo = Base por encima de 2026, negativo = Base por debajo).
+    Interpretación usada: <b>“Elevación”</b> = <span class="chip">Base − <span id="labelCompChip">2026</span></span> (positivo = Base por encima de 2026, negativo = Base por debajo).
     <br/>
     Fuente: <code>ANALISIS DE COSTOS.xlsx</code> · Generado: 2026-01-16
+    <div class="labbox">
+      <label for="sourceSelect">Laboratorio:</label>
+      <select id="sourceSelect">
+        <option value="FESA 2026">FESA 2026 (pre-cargado)</option>
+      </select>
+      <div class="hint" id="sourceHint">Cargando listas…</div>
+    </div>
+
   </div>
 
   <div class="grid">
@@ -293,18 +328,18 @@
     </div>
 
     <div class="card" style="grid-column: span 6;">
-      <div class="section-title">Distribución – Elevación % del Costo (Base vs 2026)</div>
+      <div class="section-title">Distribución – Elevación % del Costo (Base vs <span id="labelComp4">2026</span>)</div>
       <div id="chartCostHist" style="height: 320px;"></div>
       <div class="small">% = (Costo_Base − Costo_2026) / Costo_2026</div>
     </div>
     <div class="card" style="grid-column: span 6;">
-      <div class="section-title">Scatter – % elevación Costo vs Costo 2026</div>
+      <div class="section-title">Scatter – % elevación Costo vs Costo <span id="labelCompCost">2026</span></div>
       <div id="chartCostScatter" style="height: 320px;"></div>
       <div class="small">Puntos fuera de rango pueden ser outliers (denominador pequeño).</div>
     </div>
 
     <div class="card" style="grid-column: span 6;">
-      <div class="section-title">Distribución – Elevación % del PMP (Base vs 2026)</div>
+      <div class="section-title">Distribución – Elevación % del PMP (Base vs <span id="labelComp4">2026</span>)</div>
       <div id="chartPmpHist" style="height: 320px;"></div>
       <div class="small">% = (PMP_Base − PMP_2026) / PMP_2026</div>
     </div>
@@ -611,7 +646,7 @@ function renderRecommendations(rows) {
     </div>
 
     <div style="margin-top:12px;">
-      <div class="small"><b>Peor margen (Base vs 2026):</b> (si quieres, lo cambio a $ de utilidad)</div>
+      <div class="small"><b>Peor margen (Base vs <span id="labelComp4">2026</span>):</b> (si quieres, lo cambio a $ de utilidad)</div>
       <ol class="list">${worstMargin.map(r => li(r, "margin")).join("")}</ol>
     </div>
 
@@ -780,6 +815,652 @@ function wireUI() {
     downloadExcelIncrementos(filteredData(filters));
   });
 }
+
+
+/* ============================================================
+   NUEVO: Cargar listas externas (Excel) y permitir comparar por "Laboratorio"
+   - No rompe el dataset pre-cargado (FESA 2026) si el Excel no está disponible.
+   - Para actualizar, solo reemplaza el archivo: precios_febrero.xlsx
+   ============================================================ */
+
+const EXTERNAL_XLSX_FILE = "precios_febrero.xlsx";
+
+// Normaliza EAN/código
+function normEAN(v){
+  if (v === null || v === undefined) return "";
+  // si viene como número
+  if (typeof v === "number" && isFinite(v)) {
+    // evita notación científica
+    const s = String(v);
+    if (s.includes("e") || s.includes("E")) {
+      // fallback: redondea a entero si aplica
+      const n = Math.round(v);
+      return String(n);
+    }
+    // quita .0
+    return s.replace(/\.0+$/,"");
+  }
+  return String(v).trim();
+}
+
+function toNum(v){
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number" && isFinite(v)) return v;
+  const s = String(v).replaceAll("$","").replaceAll(",","").trim();
+  if (!s) return null;
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}
+
+// Base pre-cargada (Costo/PMP Base)
+const BASE_BY_EAN = (() => {
+  const m = new Map();
+  DATA.forEach(r => {
+    const e = normEAN(r.EAN);
+    if (!e || m.has(e)) return;
+    m.set(e, {
+      EAN: e,
+      Articulo: r.Articulo,
+      Costo_Base: toNum(r.Costo_Base),
+      PMP_Base: toNum(r.PMP_Base),
+      Margen_Base: toNum(r.Margen_Base)
+    });
+  });
+  return m;
+})();
+
+// Fuentes de comparación (default: FESA 2026 desde DATA pre-cargada)
+let SOURCES = (() => {
+  const out = {};
+  const fesa = new Map();
+  DATA.forEach(r => {
+    const e = normEAN(r.EAN);
+    if (!e || fesa.has(e)) return;
+    fesa.set(e, { costo: toNum(r.Costo_2026), pmp: toNum(r.PMP_2026) });
+  });
+  out["FESA 2026"] = fesa;
+  return out;
+})();
+
+let CURRENT_SOURCE = "FESA 2026";
+let CURRENT_DATA = DATA;
+
+// Encuentra fila de headers en un sheet (header:1)
+function findHeaderRow(matrix){
+  const max = Math.min(120, matrix.length);
+  const isHeaderLike = (row) => {
+    const cells = row.map(c => String(c ?? "").trim().toUpperCase());
+    const hasEan = cells.some(c => c.includes("EAN") || (c.includes("CODIGO") && c.includes("BARR")));
+    const hasProd = cells.some(c => c.includes("ARTIC") || c.includes("PRODUCT") || c.includes("DESCRIP"));
+    const hasPrice = cells.some(c => c.includes("PRECIO") || c.includes("COSTO") || c.includes("IMPORTE") || c.match(/20\d\d/));
+    const hasPmp = cells.some(c => c === "PMP" || c.includes("PMP"));
+    const score = (hasEan?2:0) + (hasProd?1:0) + (hasPrice?1:0) + (hasPmp?1:0);
+    return score >= 3;
+  };
+  for(let i=0;i<max;i++){
+    const row = matrix[i] || [];
+    if (isHeaderLike(row)) return i;
+  }
+  return -1;
+}
+
+function normalizeHeader(h){
+  if (h === null || h === undefined) return "";
+  if (typeof h === "number" && isFinite(h)) return String(h);
+  return String(h).trim().toUpperCase();
+}
+
+function bestNumericCol(matrix, startRow, candidates){
+  // Elige la columna con más celdas numéricas en las siguientes ~200 filas
+  let best = null, bestScore = -1;
+  const end = Math.min(matrix.length, startRow + 400);
+  candidates.forEach(ci => {
+    let s = 0;
+    for(let r=startRow;r<end;r++){
+      const v = toNum(matrix[r]?.[ci]);
+      if (v !== null) s++;
+    }
+    if (s > bestScore) { bestScore = s; best = ci; }
+  });
+  return best;
+}
+
+// Parsea una hoja a Map(EAN -> {costo, pmp})
+function parseSheetToMap(ws){
+  const matrix = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+  const hrow = findHeaderRow(matrix);
+  if (hrow < 0) return null;
+
+  const headers = (matrix[hrow] || []).map(normalizeHeader);
+
+  // columnas clave
+  const eanCandidates = [];
+  const pmpCandidates = [];
+  const priceCandidates = [];
+  const yearCandidates = [];
+
+  headers.forEach((h, idx) => {
+    const hu = h;
+    if (!hu) return;
+    if (hu.includes("EAN") || (hu.includes("CODIGO") && hu.includes("BARR"))) eanCandidates.push(idx);
+    if (hu === "PMP" || hu.includes("PMP")) pmpCandidates.push(idx);
+    if (hu.includes("PRECIO") || hu.includes("COSTO") || hu.includes("IMPORTE") || hu.includes("NETO")) priceCandidates.push(idx);
+    const yr = Number(hu);
+    if (isFinite(yr) && yr >= 2000 && yr <= 2100) yearCandidates.push({idx, yr});
+  });
+
+  const eanCol = eanCandidates[0] ?? 0;
+
+  // precio: prioriza año máximo (ej: 2026) si existe
+  let priceCol = null;
+  if (yearCandidates.length){
+    yearCandidates.sort((a,b)=>b.yr-a.yr);
+    priceCol = yearCandidates[0].idx;
+  } else if (priceCandidates.length){
+    priceCol = bestNumericCol(matrix, hrow+1, priceCandidates);
+  }
+
+  // pmp: el que más datos numéricos tenga
+  let pmpCol = null;
+  if (pmpCandidates.length){
+    pmpCol = bestNumericCol(matrix, hrow+1, pmpCandidates);
+  }
+
+  const out = new Map();
+  for(let r=hrow+1; r<matrix.length; r++){
+    const row = matrix[r];
+    if (!row) continue;
+    const e = normEAN(row[eanCol]);
+    if (!e) continue;
+
+    const costo = priceCol !== null ? toNum(row[priceCol]) : null;
+    const pmp = pmpCol !== null ? toNum(row[pmpCol]) : null;
+
+    if (costo === null && pmp === null) continue;
+    // evita sobreescritura si ya hay
+    if (!out.has(e)) out.set(e, { costo, pmp });
+  }
+  return out;
+}
+
+function cleanSourceName(name){
+  return String(name || "").trim().replace(/\s+/g," ");
+}
+
+function populateSourceSelect(){
+  const sel = document.getElementById("sourceSelect");
+  if (!sel) return;
+
+  // limpia y vuelve a llenar
+  sel.innerHTML = "";
+  const keys = Object.keys(SOURCES);
+  // siempre primero FESA 2026
+  keys.sort((a,b)=>{
+    if (a === "FESA 2026") return -1;
+    if (b === "FESA 2026") return 1;
+    return a.localeCompare(b);
+  });
+
+  keys.forEach(k=>{
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = (k === "FESA 2026") ? "FESA 2026 (pre-cargado)" : k;
+    sel.appendChild(opt);
+  });
+
+  sel.value = CURRENT_SOURCE;
+}
+
+function setCompLabel(label){
+  const ids = ["labelComp","labelComp2","labelComp3","labelCompChip","labelComp4","labelCompCost","labelCompPmp"];
+  ids.forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  });
+
+  // actualiza títulos de columnas en Tabulator
+  if (table) {
+    try{
+      table.updateColumnDefinition("Costo_2026", {title:`Costo ${label}`});
+      table.updateColumnDefinition("PMP_2026", {title:`PMP ${label}`});
+    }catch(e){}
+  }
+}
+
+// Calcula mejor precio mercado (mínimo) entre todas las fuentes disponibles
+function marketBestForEAN(ean){
+  let bestCosto = null, bestCostoSrc = null;
+  let bestPmp = null, bestPmpSrc = null;
+
+  Object.keys(SOURCES).forEach(src=>{
+    const m = SOURCES[src];
+    const v = m?.get?.(ean);
+    if (!v) return;
+    const c = toNum(v.costo);
+    const p = toNum(v.pmp);
+    if (c !== null && (bestCosto === null || c < bestCosto)) { bestCosto = c; bestCostoSrc = src; }
+    if (p !== null && (bestPmp === null || p < bestPmp)) { bestPmp = p; bestPmpSrc = src; }
+  });
+
+  return {bestCosto, bestCostoSrc, bestPmp, bestPmpSrc};
+}
+
+// Construye CURRENT_DATA a partir del BASE + fuente seleccionada
+function buildDataForSource(sourceKey){
+  const srcMap = SOURCES[sourceKey] || new Map();
+
+  const rows = [];
+  BASE_BY_EAN.forEach((b, ean)=>{
+    const comp = srcMap.get(ean);
+    if (!comp) return;
+
+    const Costo_Base = toNum(b.Costo_Base);
+    const PMP_Base = toNum(b.PMP_Base);
+
+    const Costo_2026 = toNum(comp.costo);
+    const PMP_2026 = toNum(comp.pmp);
+
+    const Costo_diff = (Costo_Base !== null && Costo_2026 !== null) ? (Costo_Base - Costo_2026) : null;
+    const Costo_pct_vs_2026 = (Costo_diff !== null && Costo_2026) ? (Costo_diff / Costo_2026) : null;
+
+    const PMP_diff = (PMP_Base !== null && PMP_2026 !== null) ? (PMP_Base - PMP_2026) : null;
+    const PMP_pct_vs_2026 = (PMP_diff !== null && PMP_2026) ? (PMP_diff / PMP_2026) : null;
+
+    const Margen_Base = toNum(b.Margen_Base);
+    const Margen_2026 = (PMP_2026 !== null && Costo_2026 !== null && PMP_2026) ? ((PMP_2026 - Costo_2026) / PMP_2026) : null;
+
+    const mk = marketBestForEAN(ean);
+    const Mejor_Costo_Mercado = mk.bestCosto;
+    const Fuente_Mejor_Costo = mk.bestCostoSrc;
+    const Mejor_PMP_Mercado = mk.bestPmp;
+    const Fuente_Mejor_PMP = mk.bestPmpSrc;
+
+    // sugerido = mejor mercado (mínimo disponible)
+    const Costo_Sugerido = Mejor_Costo_Mercado;
+    const PMP_Sugerido = Mejor_PMP_Mercado;
+
+    rows.push({
+      EAN: ean,
+      Articulo: b.Articulo ?? "",
+      Costo_Base, Costo_2026, Costo_diff, Costo_pct_vs_2026,
+      PMP_Base, PMP_2026, PMP_diff, PMP_pct_vs_2026,
+      Margen_Base, Margen_2026,
+
+      Mejor_Costo_Mercado,
+      Fuente_Mejor_Costo,
+      Mejor_PMP_Mercado,
+      Fuente_Mejor_PMP,
+      Costo_Sugerido,
+      PMP_Sugerido,
+    });
+  });
+
+  return rows;
+}
+
+// Percentiles
+function percentile(sortedArr, p){
+  if (!sortedArr.length) return null;
+  const idx = (sortedArr.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  const w = idx - lo;
+  return sortedArr[lo]*(1-w) + sortedArr[hi]*w;
+}
+
+// Recalcula métricas para KPIs y Top lists
+function computeMetricsFromRows(rows){
+  const costRows = rows.filter(r => toNum(r.Costo_2026) !== null && toNum(r.Costo_Base) !== null && toNum(r.Costo_2026) > 0 && r.Costo_diff !== null && r.Costo_pct_vs_2026 !== null);
+  const pmpRows  = rows.filter(r => toNum(r.PMP_2026) !== null && toNum(r.PMP_Base) !== null && toNum(r.PMP_2026) > 0 && r.PMP_diff !== null && r.PMP_pct_vs_2026 !== null);
+
+  const split = (arr, keyDiff) => {
+    let pos=0, neg=0, zero=0;
+    arr.forEach(r=>{
+      const d = toNum(r[keyDiff]);
+      if (d === null) return;
+      if (d>0) pos++; else if (d<0) neg++; else zero++;
+    });
+    return {pos,neg,zero};
+  };
+
+  const costSplit = split(costRows, "Costo_diff");
+  const pmpSplit  = split(pmpRows, "PMP_diff");
+
+  const costPct = costRows.map(r=>toNum(r.Costo_pct_vs_2026)).filter(v=>v!==null).sort((a,b)=>a-b);
+  const pmpPct  = pmpRows.map(r=>toNum(r.PMP_pct_vs_2026)).filter(v=>v!==null).sort((a,b)=>a-b);
+
+  const mean = (arr) => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const med  = (arr) => percentile(arr, 0.5);
+
+  const topBy = (arr, key, n=10) => {
+    return arr
+      .slice()
+      .sort((a,b)=> (toNum(b[key])??-1e18) - (toNum(a[key])??-1e18))
+      .slice(0,n);
+  };
+
+  const costPos = costRows.filter(r=>toNum(r.Costo_diff) !== null && toNum(r.Costo_diff) > 0);
+  const pmpPos  = pmpRows.filter(r=>toNum(r.PMP_diff) !== null && toNum(r.PMP_diff) > 0);
+
+  return {
+    n_cost: costRows.length,
+    cost_pos: costSplit.pos,
+    cost_neg: costSplit.neg,
+    cost_zero: costSplit.zero,
+    cost_mean_pct: mean(costPct) ?? 0,
+    cost_median_pct: med(costPct) ?? 0,
+    cost_p10_pct: percentile(costPct, 0.10) ?? 0,
+    cost_p90_pct: percentile(costPct, 0.90) ?? 0,
+
+    n_pmp: pmpRows.length,
+    pmp_pos: pmpSplit.pos,
+    pmp_neg: pmpSplit.neg,
+    pmp_zero: pmpSplit.zero,
+    pmp_mean_pct: mean(pmpPct) ?? 0,
+    pmp_median_pct: med(pmpPct) ?? 0,
+    pmp_p10_pct: percentile(pmpPct, 0.10) ?? 0,
+    pmp_p90_pct: percentile(pmpPct, 0.90) ?? 0,
+
+    top_cost_pct: topBy(costPos, "Costo_pct_vs_2026", 10),
+    top_cost_abs: topBy(costPos, "Costo_diff", 10),
+    top_pmp_pct: topBy(pmpPos, "PMP_pct_vs_2026", 10),
+    top_pmp_abs: topBy(pmpPos, "PMP_diff", 10),
+  };
+}
+
+function updateKPIsAndTops(rows){
+  const m = computeMetricsFromRows(rows);
+
+  setText("kpiCostN", numFmt.format(m.n_cost));
+  setText("kpiCostSplit", `${m.cost_pos} ↑ · ${m.cost_neg} ↓ · ${m.cost_zero} =`);
+  setText("kpiCostPct", `${(m.cost_mean_pct*100).toFixed(2)}% / ${(m.cost_median_pct*100).toFixed(2)}%`);
+  setText("kpiCostPctHint", `P10=${(m.cost_p10_pct*100).toFixed(2)}% · P90=${(m.cost_p90_pct*100).toFixed(2)}%`);
+
+  setText("kpiPmpN", numFmt.format(m.n_pmp));
+  setText("kpiPmpSplit", `${m.pmp_pos} ↑ · ${m.pmp_neg} ↓ · ${m.pmp_zero} =`);
+  setText("kpiPmpPct", `${(m.pmp_mean_pct*100).toFixed(2)}% / ${(m.pmp_median_pct*100).toFixed(2)}%`);
+  setText("kpiPmpPctHint", `P10=${(m.pmp_p10_pct*100).toFixed(2)}% · P90=${(m.pmp_p90_pct*100).toFixed(2)}%`);
+
+  buildTopList("topCostPct", m.top_cost_pct, "cost");
+  buildTopList("topCostAbs", m.top_cost_abs, "cost");
+  buildTopList("topPmpPct", m.top_pmp_pct, "pmp");
+  buildTopList("topPmpAbs", m.top_pmp_abs, "pmp");
+}
+
+// Render charts dinámicos
+function renderChartsDynamic(rows, label){
+  if (typeof Plotly === "undefined") return;
+
+  const costPct = rows.map(d => safeNumber(d.Costo_pct_vs_2026)).filter(v => v !== null).map(v => v*100);
+  const pmpPct  = rows.map(d => safeNumber(d.PMP_pct_vs_2026)).filter(v => v !== null).map(v => v*100);
+
+  const costHistData = [{
+    type: "histogram",
+    x: costPct,
+    nbinsx: 40,
+    hovertemplate: "%{x:.2f}%<extra></extra>",
+  }];
+  const commonLayout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    margin: {l: 50, r: 10, t: 10, b: 45},
+    font: {color: "white"},
+  };
+  Plotly.react("chartCostHist", costHistData, {
+    ...commonLayout,
+    xaxis: { title: "% Δ Costo", gridcolor: "rgba(255,255,255,.08)" },
+    yaxis: { title: "Frecuencia", gridcolor: "rgba(255,255,255,.08)" },
+  }, {displayModeBar:false});
+
+  const scatterX = [];
+  const scatterY = [];
+  const scatterT = [];
+  rows.forEach(d => {
+    const x = safeNumber(d.Costo_2026);
+    const y = safeNumber(d.Costo_pct_vs_2026);
+    if (x !== null && y !== null) {
+      scatterX.push(x);
+      scatterY.push(y*100);
+      scatterT.push(text(d.Articulo));
+    }
+  });
+  Plotly.react("chartCostScatter", [{
+    type: "scattergl",
+    mode: "markers",
+    x: scatterX,
+    y: scatterY,
+    text: scatterT,
+    hovertemplate: `%{text}<br>Costo ${label}=%{x:.2f}<br>% Δ Costo=%{y:.2f}%<extra></extra>`,
+    marker: { size: 6, opacity: 0.8 },
+  }], {
+    ...commonLayout,
+    xaxis: { title: `Costo ${label}`, gridcolor: "rgba(255,255,255,.08)", type: "log" },
+    yaxis: { title: "% Δ Costo", gridcolor: "rgba(255,255,255,.08)" },
+  }, {displayModeBar:false});
+
+  Plotly.react("chartPmpHist", [{
+    type: "histogram",
+    x: pmpPct,
+    nbinsx: 40,
+    hovertemplate: "%{x:.2f}%<extra></extra>",
+  }], {
+    ...commonLayout,
+    xaxis: { title: "% Δ PMP", gridcolor: "rgba(255,255,255,.08)" },
+    yaxis: { title: "Frecuencia", gridcolor: "rgba(255,255,255,.08)" },
+  }, {displayModeBar:false});
+}
+
+// Override: filteredData usa CURRENT_DATA
+function filteredData(filters) {
+  return CURRENT_DATA.filter(r => rowMatchesFilter(r, filters));
+}
+
+// Override: export CSV incluye sugeridos y mejores del mercado
+function downloadCSV(rows) {
+  const cols = [
+    "EAN","Articulo",
+    "Costo_Base","Costo_2026","Costo_diff","Costo_pct_vs_2026",
+    "PMP_Base","PMP_2026","PMP_diff","PMP_pct_vs_2026",
+    "Margen_Base","Margen_2026",
+    "Mejor_Costo_Mercado","Fuente_Mejor_Costo","Costo_Sugerido",
+    "Mejor_PMP_Mercado","Fuente_Mejor_PMP","PMP_Sugerido"
+  ];
+  const esc = (s) => `"${String(s ?? "").replaceAll('"','""')}"`;
+  const lines = [cols.join(",")].concat(rows.map(r => cols.map(c => esc(r[c])).join(",")));
+  const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `comparativo_${CURRENT_SOURCE.replaceAll(" ","_")}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Override: Excel incrementos incluye precio sugerido + fuente
+function downloadExcelIncrementos(rows) {
+  const inc = rows.filter(r => {
+    const cd = safeNumber(r.Costo_diff);
+    const pd = safeNumber(r.PMP_diff);
+    return (cd !== null && cd > 0) || (pd !== null && pd > 0);
+  });
+
+  const cols = [
+    ["EAN", "EAN"],
+    ["Articulo", "Artículo"],
+    ["Costo_Base", "Costo Base"],
+    ["Costo_2026", `Costo ${CURRENT_SOURCE}`],
+    ["Costo_diff", "Δ Costo"],
+    ["Costo_pct_vs_2026", "% Δ Costo"],
+    ["Mejor_Costo_Mercado", "Mejor Costo Mercado"],
+    ["Fuente_Mejor_Costo", "Fuente (Mejor Costo)"],
+    ["Costo_Sugerido", "Costo sugerido (negociar)"],
+    ["PMP_Base", "PMP Base"],
+    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
+    ["PMP_diff", "Δ PMP"],
+    ["PMP_pct_vs_2026", "% Δ PMP"],
+    ["Mejor_PMP_Mercado", "Mejor PMP Mercado"],
+    ["Fuente_Mejor_PMP", "Fuente (Mejor PMP)"],
+    ["PMP_Sugerido", "PMP sugerido (negociar)"],
+    ["Margen_Base", "Margen Base"],
+    ["Margen_2026", `Margen ${CURRENT_SOURCE}`],
+    ["Rec", "Recomendación"],
+  ];
+
+  const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
+  const body = inc.map(r => {
+    const cells = cols.map(([key]) => {
+      let v;
+      if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
+      else v = r[key];
+      const n = safeNumber(v);
+      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
+        return `<td style="mso-number-format:'0.00';">${n}</td>`;
+      }
+      return `<td>${escHtml(v)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("\n");
+
+  const htmlXls = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
+    <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+  </body></html>`;
+
+  const blob = new Blob([htmlXls], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `incrementos_${CURRENT_SOURCE.replaceAll(" ","_")}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function loadExternalWorkbook(){
+  const hint = document.getElementById("sourceHint");
+  const setHint = (t)=>{ if(hint) hint.textContent = t; };
+
+  // 1) Prefer JSON lists (no dependencia a internet / CDN)
+  try{
+    setHint("Cargando listas…");
+    const manRes = await fetch("./data/manifest.json", {cache:"no-store"});
+    if (manRes.ok){
+      const man = await manRes.json();
+      const items = (man && man.sources) ? man.sources : [];
+      let loaded = 0;
+      for (const it of items){
+        if (!it || !it.file) continue;
+        const res = await fetch(it.file, {cache:"no-store"});
+        if (!res.ok) continue;
+        const js = await res.json();
+        const rows = js && js.rows ? js.rows : [];
+        const m = new Map();
+        for (const r of rows){
+          const e = normEAN(r.ean);
+          if (!e || m.has(e)) continue;
+          m.set(e, {
+            costo: toNum(r.costo),
+            pmp: toNum(r.pmp),
+            articulo: r.articulo ? String(r.articulo) : "",
+            laboratorio: r.laboratorio ? String(r.laboratorio) : ""
+          });
+        }
+        if (m.size){
+          const key = cleanSourceName(it.label || js.source || "LISTA");
+          SOURCES[key] = m;
+          loaded++;
+        }
+      }
+      populateSourceSelect();
+      setHint(`Listas cargadas: ${Object.keys(SOURCES).length} (incluye FESA 2026).`);
+      return;
+    }
+  }catch(err){
+    console.warn("JSON lists failed:", err);
+  }
+
+  // 2) Fallback: XLSX via SheetJS (si está disponible)
+  if (typeof XLSX === "undefined") {
+    setHint("No se pudo cargar el lector XLSX. Usando solo FESA 2026.");
+    return;
+  }
+
+  try{
+    setHint("Cargando listas desde Excel…");
+    const res = await fetch(EXTERNAL_XLSX_FILE, {cache:"no-store"});
+    if (!res.ok) {
+      setHint(`No se encontró ${EXTERNAL_XLSX_FILE}. Usando solo FESA 2026.`);
+      return;
+    }
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, {type:"array"});
+
+    wb.SheetNames.forEach(sn=>{
+      const ws = wb.Sheets[sn];
+      if (!ws) return;
+      const m = parseSheetToMap(ws);
+      if (!m || !m.size) return;
+      const key = cleanSourceName(sn);
+      SOURCES[key] = m;
+    });
+
+    populateSourceSelect();
+    setHint(`Listas cargadas: ${Object.keys(SOURCES).length} (incluye FESA 2026).`);
+  }catch(err){
+    console.warn(err);
+    setHint("Error leyendo el Excel. Usando solo FESA 2026.");
+  }
+}
+
+function applySource(sourceKey){
+  CURRENT_SOURCE = sourceKey;
+  setCompLabel(sourceKey);
+
+  // reconstruye data
+  CURRENT_DATA = buildDataForSource(sourceKey);
+
+  // actualiza tabla
+  if (table) {
+    table.replaceData(CURRENT_DATA);
+  }
+
+  // actualiza KPIs / Tops / Recs
+  updateKPIsAndTops(CURRENT_DATA);
+
+  const filters = applyFilters(); // reaplica filtros y recomendaciones
+  // Plotly charts
+  renderChartsDynamic(filteredData(filters), sourceKey);
+}
+
+// Wire selector
+function wireSourceSelect(){
+  const sel = document.getElementById("sourceSelect");
+  if (!sel) return;
+  sel.addEventListener("change", ()=>{
+    applySource(sel.value);
+  });
+}
+
+// Boot hook: después de main() ya existe tabla, chart, etc
+window.addEventListener("load", async ()=>{
+  try{
+    wireSourceSelect();
+    populateSourceSelect();
+    setCompLabel(CURRENT_SOURCE);
+    // inicializa métricas/plots con data pre-cargada
+    updateKPIsAndTops(CURRENT_DATA);
+    renderChartsDynamic(CURRENT_DATA, CURRENT_SOURCE);
+
+    await loadExternalWorkbook();
+    // si tras cargar hay más fuentes, deja default FESA
+    const sel = document.getElementById("sourceSelect");
+    if (sel) sel.value = CURRENT_SOURCE;
+  }catch(e){}
+});
+
 
 (function main() {
   if (typeof Tabulator === "undefined") {
