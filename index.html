@@ -320,6 +320,7 @@
         <button class="btn" id="btnReset">Reset</button>
         <button class="btn" id="btnCSV">Descargar CSV (filtrado)</button>
         <button class="btn" id="btnXLS">Descargar Excel (incrementos)</button>
+        <button class="btn" id="btnXLSFull">Descargar Excel completo</button>
       </div>
       <div class="small" style="margin-top: 10px;">
         Tip: da clic en encabezados para ordenar. Puedes filtrar por texto y por “solo ↑”. El CSV respeta filtros.
@@ -562,6 +563,64 @@ function downloadExcelIncrementos(rows) {
   const a = document.createElement("a");
   a.href = url;
   a.download = "incrementos_filtrados.xls";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Nuevo: Excel completo (TODOS los renglones de la lista seleccionada)
+// - Incluye columnas de incremento (si hay Base) y precio sugerido (mejor mercado)
+// - No aplica filtros ni recorta solo incrementos
+function downloadExcelCompleto(rows) {
+  const cols = [
+    ["EAN", "EAN"],
+    ["Articulo", "Artículo"],
+    ["Costo_Base", "Costo Base"],
+    ["Costo_2026", `Costo ${CURRENT_SOURCE}`],
+    ["Costo_diff", "Δ Costo"],
+    ["Costo_pct_vs_2026", "% Δ Costo"],
+    ["Mejor_Costo_Mercado", "Mejor Costo Mercado"],
+    ["Fuente_Mejor_Costo", "Fuente (Mejor Costo)"],
+    ["Costo_Sugerido", "Costo sugerido (negociar)"],
+    ["PMP_Base", "PMP Base"],
+    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
+    ["PMP_diff", "Δ PMP"],
+    ["PMP_pct_vs_2026", "% Δ PMP"],
+    ["Mejor_PMP_Mercado", "Mejor PMP Mercado"],
+    ["Fuente_Mejor_PMP", "Fuente (Mejor PMP)"],
+    ["PMP_Sugerido", "PMP sugerido (negociar)"],
+    ["Margen_Base", "Margen Base"],
+    ["Margen_2026", `Margen ${CURRENT_SOURCE}`],
+    ["Rec", "Recomendación"],
+  ];
+
+  const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
+  const body = (rows || []).map(r => {
+    const cells = cols.map(([key]) => {
+      let v;
+      if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
+      else v = r[key];
+
+      const n = safeNumber(v);
+      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
+        return `<td style="mso-number-format:'0.00';">${n}</td>`;
+      }
+      return `<td>${escHtml(v)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("\n");
+
+  const htmlXls = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
+    <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+  </body></html>`;
+
+  const blob = new Blob([htmlXls], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `comparativo_completo_${CURRENT_SOURCE.replaceAll(" ","_")}.xls`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -814,6 +873,15 @@ function wireUI() {
     const filters = applyFilters();
     downloadExcelIncrementos(filteredData(filters));
   });
+
+  // Nuevo: Excel completo (NO respeta filtros; descarga todos los renglones de la lista seleccionada)
+  const btnFull = document.getElementById("btnXLSFull");
+  if (btnFull){
+    btnFull.addEventListener("click", () => {
+      // asegura que las métricas estén actualizadas
+      downloadExcelCompleto(CURRENT_DATA);
+    });
+  }
 }
 
 
@@ -983,10 +1051,19 @@ function parseSheetToMap(ws){
   return out;
 }
 
-function cleanSourceName(name){
-  return String(name || "").trim().replace(/\s+/g," ");
+function cleanSourceName(name, fallback){
+  let s = String(name || "").trim().replace(/\s+/g," ");
+  if (!s) s = String(fallback || "LISTA").trim();
+  if (!s) s = "LISTA";
+  return s;
 }
 
+function uniqueSourceKey(base){
+  let k = base;
+  let i = 2;
+  while (SOURCES[k]) { k = `${base} (${i++})`; }
+  return k;
+}
 function populateSourceSelect(){
   const sel = document.getElementById("sourceSelect");
   if (!sel) return;
@@ -1050,15 +1127,15 @@ function buildDataForSource(sourceKey){
   const srcMap = SOURCES[sourceKey] || new Map();
 
   const rows = [];
-  BASE_BY_EAN.forEach((b, ean)=>{
-    const comp = srcMap.get(ean);
-    if (!comp) return;
+  // Mostrar TODOS los códigos de la lista seleccionada (aunque no existan en Base)
+  srcMap.forEach((comp, ean)=>{
+    const b = BASE_BY_EAN.get(ean) || {};
 
     const Costo_Base = toNum(b.Costo_Base);
     const PMP_Base = toNum(b.PMP_Base);
 
-    const Costo_2026 = toNum(comp.costo);
-    const PMP_2026 = toNum(comp.pmp);
+    const Costo_2026 = toNum(comp?.costo);
+    const PMP_2026 = toNum(comp?.pmp);
 
     const Costo_diff = (Costo_Base !== null && Costo_2026 !== null) ? (Costo_Base - Costo_2026) : null;
     const Costo_pct_vs_2026 = (Costo_diff !== null && Costo_2026) ? (Costo_diff / Costo_2026) : null;
@@ -1081,7 +1158,7 @@ function buildDataForSource(sourceKey){
 
     rows.push({
       EAN: ean,
-      Articulo: b.Articulo ?? "",
+      Articulo: (b.Articulo ?? comp?.articulo ?? ""),
       Costo_Base, Costo_2026, Costo_diff, Costo_pct_vs_2026,
       PMP_Base, PMP_2026, PMP_diff, PMP_pct_vs_2026,
       Margen_Base, Margen_2026,
@@ -1095,8 +1172,25 @@ function buildDataForSource(sourceKey){
     });
   });
 
+  // Si por alguna razón la lista viene vacía, conserva el comportamiento anterior (solo comparables)
+  if (!rows.length){
+    BASE_BY_EAN.forEach((b, ean)=>{
+      const comp = srcMap.get(ean);
+      if (!comp) return;
+      rows.push({
+        EAN: ean,
+        Articulo: b.Articulo ?? "",
+        Costo_Base: toNum(b.Costo_Base),
+        Costo_2026: toNum(comp.costo),
+        PMP_Base: toNum(b.PMP_Base),
+        PMP_2026: toNum(comp.pmp),
+      });
+    });
+  }
+
   return rows;
 }
+
 
 // Percentiles
 function percentile(sortedArr, p){
@@ -1369,7 +1463,11 @@ async function loadExternalWorkbook(){
           });
         }
         if (m.size){
-          const key = cleanSourceName(it.label || js.source || "LISTA");
+          const fb = (it.label && String(it.label).trim()) ? it.label
+                    : (js.source && String(js.source).trim()) ? js.source
+                    : (it.file ? it.file.split("/").pop().replace(/\.[^.]+$/,"") : "LISTA");
+          let key = cleanSourceName(it.label || js.source, fb);
+          key = uniqueSourceKey(key);
           SOURCES[key] = m;
           loaded++;
         }
@@ -1403,7 +1501,8 @@ async function loadExternalWorkbook(){
       if (!ws) return;
       const m = parseSheetToMap(ws);
       if (!m || !m.size) return;
-      const key = cleanSourceName(sn);
+      let key = cleanSourceName(sn, `LISTA ${Object.keys(SOURCES).length+1}`);
+      key = uniqueSourceKey(key);
       SOURCES[key] = m;
     });
 
