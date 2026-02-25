@@ -262,6 +262,28 @@
   .labbox{ position: static; margin-top: 10px; }
 }
 
+
+/* --- Fix legibilidad del dropdown de listas (Chrome/Win/GitHub Pages) --- */
+#sourceSelect{
+  color: #111 !important;
+  background: #f3f4f6 !important;
+  border: 1px solid rgba(0,0,0,.25) !important;
+}
+#sourceSelect option{
+  color: #111 !important;
+  background: #ffffff !important;
+}
+#sourceSelect:focus{
+  outline: 2px solid rgba(99,102,241,.55);
+  outline-offset: 2px;
+}
+
+
+/* Texto de estado (Listas cargadas / hints) */
+#hint, .hint, .muted, .small-muted{
+  color: rgba(255,255,255,.85) !important;
+}
+
 </style>
 </head>
 <body>
@@ -276,8 +298,7 @@
     <div class="labbox">
       <label for="sourceSelect">Laboratorio:</label>
       <select id="sourceSelect">
-        <option value="FESA 2026">FESA 2026 (pre-cargado)</option>
-      </select>
+</select>
       <div class="hint" id="sourceHint">Cargando listas…</div>
     </div>
 
@@ -520,6 +541,25 @@ function rowRecommendation(r) {
   return "—";
 }
 
+function rowRecommendationUtilidad(r) {
+  const p = safeNumber(r.PMP_2026);
+  const c = safeNumber(r.Costo_2026);
+  if (p === null || c === null) return "—";
+  const utilidad = p - c;
+  const margen = (p !== 0) ? (utilidad / p) : null;
+
+  if (utilidad <= 0) {
+    return "Utilidad <= 0: negociar costo urgente o ajustar PMP; considerar alternativa terapéutica/proveedor.";
+  }
+  if (margen !== null && margen < 0.08) {
+    return "Margen bajo (<8%): subir PMP si mercado lo permite y/o negociar descuento por volumen.";
+  }
+  if (margen !== null && margen < 0.15) {
+    return "Margen medio (8–15%): priorizar negociación (rebate, pronto pago) y optimizar compras (consolidar volumen).";
+  }
+  return "Margen saludable: mantener PMP y buscar mejora incremental (rebates, logística, volumen).";
+}
+
 function downloadExcelIncrementos(rows) {
   const inc = rows.filter(r => {
     const cd = safeNumber(r.Costo_diff);
@@ -542,6 +582,7 @@ function downloadExcelIncrementos(rows) {
     ["Margen_2026", "Margen 2026"],
     ["Utilidad_2026", "Utilidad (PMP − Costo)"],
     ["Rec", "Recomendación"],
+    ["RecUtil", "Recomendaciones para mejorar la utilidad"],
   ];
 
   const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
@@ -549,6 +590,7 @@ function downloadExcelIncrementos(rows) {
     const cells = cols.map(([key]) => {
       let v;
       if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "RecUtil") v = rowRecommendationUtilidad(r);
       else if (key === "Utilidad_2026") {
         const p = safeNumber(r.PMP_2026);
         const c = safeNumber(r.Costo_2026);
@@ -558,7 +600,7 @@ function downloadExcelIncrementos(rows) {
             else v = r[key];
       // Normaliza números para que Excel los lea bien
       const n = safeNumber(v);
-      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026")) {
+      if (n !== null && key !== "Rec" && key !== "RecUtil" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026")) {
         return `<td style="mso-number-format:'0.00';">${n}</td>`;
       }
       return `<td>${escHtml(v)}</td>`;
@@ -606,6 +648,7 @@ function downloadExcelCompleto(rows) {
     ["Margen_2026", `Margen ${CURRENT_SOURCE}`],
     ["Utilidad_2026", `Utilidad (PMP − Costo) ${CURRENT_SOURCE}`],
     ["Rec", "Recomendación"],
+    ["RecUtil", "Recomendaciones para mejorar la utilidad"],
   ];
 
   const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
@@ -613,6 +656,7 @@ function downloadExcelCompleto(rows) {
     const cells = cols.map(([key]) => {
       let v;
       if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "RecUtil") v = rowRecommendationUtilidad(r);
       else if (key === "Utilidad_2026") {
         const p = safeNumber(r.PMP_2026);
         const c = safeNumber(r.Costo_2026);
@@ -622,7 +666,7 @@ function downloadExcelCompleto(rows) {
       else v = r[key];
 
       const n = safeNumber(v);
-      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
+      if (n !== null && key !== "Rec" && key !== "RecUtil" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
         return `<td style="mso-number-format:'0.00';">${n}</td>`;
       }
       return `<td>${escHtml(v)}</td>`;
@@ -734,6 +778,8 @@ function renderRecommendations(rows) {
 }
 
 let table = null;
+let tableReady = false;
+let pendingSource = null;
 
 function initTable() {
   table = new Tabulator("#table", {
@@ -783,6 +829,15 @@ function initTable() {
         }
       },
     ],
+  });
+  // Marcar cuando la tabla ya quedó construida (evita warnings y tablas vacías)
+  table.on("tableBuilt", ()=>{
+    tableReady = true;
+    if (pendingSource) {
+      const ps = pendingSource;
+      pendingSource = null;
+      applySource(ps);
+    }
   });
 }
 
@@ -863,7 +918,7 @@ function applyFilters() {
   // Update label
   document.getElementById("minCostPctLabel").textContent = (minCostPct*100).toFixed(0) + "%";
 
-  if (table) {
+  if (table && tableReady) {
     table.setFilter((data) => rowMatchesFilter(data, filters));
   }
   renderRecommendations(filteredData(filters));
@@ -905,7 +960,7 @@ function wireUI() {
 
 /* ============================================================
    NUEVO: Cargar listas externas (Excel) y permitir comparar por "Laboratorio"
-   - No rompe el dataset pre-cargado (FESA 2026) si el Excel no está disponible.
+   - No rompe el dataset pre-cargado si el Excel no está disponible.
    - Para actualizar, solo reemplaza el archivo: precios_febrero.xlsx
    ============================================================ */
 
@@ -927,6 +982,14 @@ function normEAN(v){
     return s.replace(/\.0+$/,"");
   }
   return String(v).trim();
+}
+
+function normName(s){
+  if (!s) return "";
+  return String(s).toUpperCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^A-Z0-9]+/g," ")
+    .trim();
 }
 
 function toNum(v){
@@ -955,20 +1018,25 @@ const BASE_BY_EAN = (() => {
   return m;
 })();
 
-// Fuentes de comparación (default: FESA 2026 desde DATA pre-cargada)
-let SOURCES = (() => {
-  const out = {};
-  const fesa = new Map();
-  DATA.forEach(r => {
-    const e = normEAN(r.EAN);
-    if (!e || fesa.has(e)) return;
-    fesa.set(e, { costo: toNum(r.Costo_2026), pmp: toNum(r.PMP_2026) });
-  });
-  out["FESA 2026"] = fesa;
-  return out;
-})();
 
-let CURRENT_SOURCE = "FESA 2026";
+// Base por nombre (fallback cuando no hay EAN)
+const BASE_BY_NAME = (() => {
+  const m = new Map();
+  DATA.forEach(r => {
+    const nn = normName(r.Articulo);
+    if (!nn || m.has(nn)) return;
+    m.set(nn, {
+      Articulo: r.Articulo,
+      Costo_Base: toNum(r.Costo_Base),
+      PMP_Base: toNum(r.PMP_Base),
+      Margen_Base: toNum(r.Margen_Base)
+    });
+  });
+  return m;
+})();
+// Fuentes de comparación (se cargan desde ./data/manifest.json)
+let SOURCES = {};
+let CURRENT_SOURCE = null;
 let CURRENT_DATA = DATA;
 
 // Encuentra fila de headers en un sheet (header:1)
@@ -1088,22 +1156,21 @@ function populateSourceSelect(){
 
   // limpia y vuelve a llenar
   sel.innerHTML = "";
-  const keys = Object.keys(SOURCES);
-  // siempre primero FESA 2026
-  keys.sort((a,b)=>{
-    if (a === "FESA 2026") return -1;
-    if (b === "FESA 2026") return 1;
-    return a.localeCompare(b);
-  });
+  const keys = Object.keys(SOURCES).sort((a,b)=>a.localeCompare(b));
 
   keys.forEach(k=>{
     const opt = document.createElement("option");
     opt.value = k;
-    opt.textContent = (k === "FESA 2026") ? "FESA 2026 (pre-cargado)" : k;
+    opt.textContent = k;
     sel.appendChild(opt);
   });
 
-  sel.value = CURRENT_SOURCE;
+  // si no hay fuente seleccionada o ya no existe, toma la primera disponible
+  if (!CURRENT_SOURCE || !SOURCES[CURRENT_SOURCE]) {
+    CURRENT_SOURCE = keys.length ? keys[0] : null;
+  }
+
+  if (CURRENT_SOURCE) sel.value = CURRENT_SOURCE;
 }
 
 function setCompLabel(label){
@@ -1147,7 +1214,7 @@ function buildDataForSource(sourceKey){
   const rows = [];
   // Mostrar TODOS los códigos de la lista seleccionada (aunque no existan en Base)
   srcMap.forEach((comp, ean)=>{
-    const b = BASE_BY_EAN.get(ean) || {};
+    const b = (String(ean).startsWith("N:") ? (BASE_BY_NAME.get(String(ean).slice(2)) || {}) : (BASE_BY_EAN.get(ean) || {}));
 
     const Costo_Base = toNum(b.Costo_Base);
     const PMP_Base = toNum(b.PMP_Base);
@@ -1164,7 +1231,7 @@ function buildDataForSource(sourceKey){
     const Margen_Base = toNum(b.Margen_Base);
     const Margen_2026 = (PMP_2026 !== null && Costo_2026 !== null && PMP_2026) ? ((PMP_2026 - Costo_2026) / PMP_2026) : null;
 
-    const mk = marketBestForEAN(ean);
+    const mk = String(ean).startsWith("N:") ? {bestCosto:null,bestCostoSrc:"",bestPmp:null,bestPmpSrc:""} : marketBestForEAN(ean);
     const Mejor_Costo_Mercado = mk.bestCosto;
     const Fuente_Mejor_Costo = mk.bestCostoSrc;
     const Mejor_PMP_Mercado = mk.bestPmp;
@@ -1419,6 +1486,7 @@ function downloadExcelIncrementos(rows) {
     ["Margen_2026", `Margen ${CURRENT_SOURCE}`],
     ["Utilidad_2026", `Utilidad (PMP − Costo) ${CURRENT_SOURCE}`],
     ["Rec", "Recomendación"],
+    ["RecUtil", "Recomendaciones para mejorar la utilidad"],
   ];
 
   const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
@@ -1426,6 +1494,7 @@ function downloadExcelIncrementos(rows) {
     const cells = cols.map(([key]) => {
       let v;
       if (key === "Rec") v = rowRecommendation(r);
+      else if (key === "RecUtil") v = rowRecommendationUtilidad(r);
       else if (key === "Utilidad_2026") {
         const p = safeNumber(r.PMP_2026);
         const c = safeNumber(r.Costo_2026);
@@ -1434,7 +1503,7 @@ function downloadExcelIncrementos(rows) {
       else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
       else v = r[key];
       const n = safeNumber(v);
-      if (n !== null && key !== "Rec" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
+      if (n !== null && key !== "Rec" && key !== "RecUtil" && key !== "Articulo" && key !== "EAN" && !(key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") && !(key.startsWith("Fuente_"))) {
         return `<td style="mso-number-format:'0.00';">${n}</td>`;
       }
       return `<td>${escHtml(v)}</td>`;
@@ -1468,6 +1537,9 @@ async function loadExternalWorkbook(){
     if (manRes.ok){
       const man = await manRes.json();
       const items = (man && man.sources) ? man.sources : [];
+      // Reset selector
+      const sourceSelect = document.getElementById("sourceSelect");
+      if (sourceSelect) sourceSelect.innerHTML = "";
       let loaded = 0;
       for (const it of items){
         if (!it || !it.file) continue;
@@ -1477,9 +1549,14 @@ async function loadExternalWorkbook(){
         const rows = js && js.rows ? js.rows : [];
         const m = new Map();
         for (const r of rows){
-          const e = normEAN(r.ean);
-          if (!e || m.has(e)) continue;
-          m.set(e, {
+          let k = normEAN(r.ean);
+          // Si no hay EAN, usa el nombre del producto como llave (para que la lista sí cargue)
+          if (!k) {
+            const nn = normName(r.articulo);
+            if (nn) k = "N:" + nn;
+          }
+          if (!k || m.has(k)) continue;
+          m.set(k, {
             costo: toNum(r.costo),
             pmp: toNum(r.pmp),
             articulo: r.articulo ? String(r.articulo) : "",
@@ -1497,7 +1574,7 @@ async function loadExternalWorkbook(){
         }
       }
       populateSourceSelect();
-      setHint(`Listas cargadas: ${Object.keys(SOURCES).length} (incluye FESA 2026).`);
+      setHint(`Listas cargadas: ${Object.keys(SOURCES).length}.`);
       return;
     }
   }catch(err){
@@ -1506,7 +1583,7 @@ async function loadExternalWorkbook(){
 
   // 2) Fallback: XLSX via SheetJS (si está disponible)
   if (typeof XLSX === "undefined") {
-    setHint("No se pudo cargar el lector XLSX. Usando solo FESA 2026.");
+    setHint("No se pudo cargar el lector XLSX. Usando listas JSON.");
     return;
   }
 
@@ -1514,7 +1591,7 @@ async function loadExternalWorkbook(){
     setHint("Cargando listas desde Excel…");
     const res = await fetch(EXTERNAL_XLSX_FILE, {cache:"no-store"});
     if (!res.ok) {
-      setHint(`No se encontró ${EXTERNAL_XLSX_FILE}. Usando solo FESA 2026.`);
+      setHint(`No se encontró ${EXTERNAL_XLSX_FILE}. Usando listas JSON.`);
       return;
     }
     const buf = await res.arrayBuffer();
@@ -1531,14 +1608,22 @@ async function loadExternalWorkbook(){
     });
 
     populateSourceSelect();
-    setHint(`Listas cargadas: ${Object.keys(SOURCES).length} (incluye FESA 2026).`);
+    setHint(`Listas cargadas: ${Object.keys(SOURCES).length}.`);
   }catch(err){
     console.warn(err);
-    setHint("Error leyendo el Excel. Usando solo FESA 2026.");
+    setHint("Error leyendo el Excel. Usando listas JSON.");
   }
 }
 
 function applySource(sourceKey){
+  // Si la tabla aún no está lista, difiere (evita setFilter antes de tableBuilt)
+  if (!tableReady) {
+    pendingSource = sourceKey;
+    CURRENT_SOURCE = sourceKey;
+    setCompLabel(sourceKey);
+    return;
+  }
+
   CURRENT_SOURCE = sourceKey;
   setCompLabel(sourceKey);
 
@@ -1553,7 +1638,9 @@ function applySource(sourceKey){
   // actualiza KPIs / Tops / Recs
   updateKPIsAndTops(CURRENT_DATA);
 
-  const filters = applyFilters(); // reaplica filtros y recomendaciones
+  // reaplica filtros y recomendaciones
+  const filters = applyFilters();
+
   // Plotly charts
   renderChartsDynamic(filteredData(filters), sourceKey);
 }
@@ -1571,20 +1658,16 @@ function wireSourceSelect(){
 window.addEventListener("load", async ()=>{
   try{
     wireSourceSelect();
+    await loadExternalWorkbook(); // carga manifest.json y llena SOURCES
     populateSourceSelect();
-    setCompLabel(CURRENT_SOURCE);
-    // inicializa métricas/plots con data pre-cargada
-    updateKPIsAndTops(CURRENT_DATA);
-    renderChartsDynamic(CURRENT_DATA, CURRENT_SOURCE);
-
-    await loadExternalWorkbook();
-    // si tras cargar hay más fuentes, deja default FESA
-    const sel = document.getElementById("sourceSelect");
-    if (sel) sel.value = CURRENT_SOURCE;
-  }catch(e){}
+    if (CURRENT_SOURCE) {
+      setCompLabel(CURRENT_SOURCE);
+      applySource(CURRENT_SOURCE);
+    }
+  }catch(e){
+    console.warn(e);
+  }
 });
-
-
 (function main() {
   if (typeof Tabulator === "undefined") {
     alert("No se pudo cargar Tabulator (tabla). Revisa conexión a internet y vuelve a abrir el archivo.");
