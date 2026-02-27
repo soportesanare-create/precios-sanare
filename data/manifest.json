@@ -22,12 +22,12 @@
       "file": "./data/medpharma_feb.json"
     },
     {
-      "label": "PHARMATYCSA 2026",
-      "file": "./data/pharmatycsa_2026.json"
+      "label": "PHARMATYCSA",
+      "file": "./data/pharmatycsa.json"
     },
     {
-      "label": "GEFARMA FEB",
-      "file": "./data/gefarma_feb.json"
+      "label": "ATRYS",
+      "file": "./data/atrys.json"
     }
   ]
 }

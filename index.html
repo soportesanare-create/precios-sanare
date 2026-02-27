@@ -560,6 +560,17 @@ function rowRecommendationUtilidad(r) {
   return "Margen saludable: mantener PMP y buscar mejora incremental (rebates, logística, volumen).";
 }
 
+
+function rowRecommendationUtilidadIntermedio(r){
+  const u = safeNumber(r.Utilidad_Intermedio_pct);
+  if (u === null) return "";
+  if (u >= 0.40) return "Alta utilidad con costo intermedio. Mantén este objetivo y busca descuentos adicionales.";
+  if (u >= 0.25) return "Utilidad media con costo intermedio. Negocia volumen/condiciones para subir el margen.";
+  if (u >= 0.10) return "Utilidad baja con costo intermedio. Prioriza bajar costo (mejor mercado) o ajustar PMP.";
+  return "Utilidad crítica con costo intermedio. Evita comprar a este nivel; requiere negociación agresiva o sustitutos.";
+}
+
+
 function downloadExcelIncrementos(rows) {
   const inc = rows.filter(r => {
     const cd = safeNumber(r.Costo_diff);
@@ -575,7 +586,8 @@ function downloadExcelIncrementos(rows) {
     ["Costo_diff", "Δ Costo"],
     ["Costo_pct_vs_2026", "% Δ Costo"],
     ["PMP_Base", "PMP Base"],
-    ["PMP_2026", "PMP 2026"],
+    ["PMP_2026_REF", "PMP 2026"],
+    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
     ["PMP_diff", "Δ PMP"],
     ["PMP_pct_vs_2026", "% Δ PMP"],
     ["Margen_Base", "Margen Base"],
@@ -583,6 +595,9 @@ function downloadExcelIncrementos(rows) {
     ["Utilidad_2026", "Utilidad (PMP − Costo)"],
     ["Rec", "Recomendación"],
     ["RecUtil", "Recomendaciones para mejorar la utilidad"],
+    ["Costo_Intermedio", "Costo intermedio (entre menor y mayor)"],
+    ["Utilidad_Intermedio_pct", "% utilidad (costo intermedio vs PMP 2026)"],
+    ["RecUtilInter", "Recomendación utilidad (costo intermedio)"],
   ];
 
   const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
@@ -591,12 +606,13 @@ function downloadExcelIncrementos(rows) {
       let v;
       if (key === "Rec") v = rowRecommendation(r);
       else if (key === "RecUtil") v = rowRecommendationUtilidad(r);
+      else if (key === "RecUtilInter") v = rowRecommendationUtilidadIntermedio(r);
       else if (key === "Utilidad_2026") {
         const p = safeNumber(r.PMP_2026);
         const c = safeNumber(r.Costo_2026);
         v = (p !== null && c !== null) ? (p - c) : null;
       }
-      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
+      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026" || key === "Utilidad_Intermedio_pct") v = pct(r[key]);
             else v = r[key];
       // Normaliza números para que Excel los lea bien
       const n = safeNumber(v);
@@ -638,6 +654,7 @@ function downloadExcelCompleto(rows) {
     ["Fuente_Mejor_Costo", "Fuente (Mejor Costo)"],
     ["Costo_Sugerido", "Costo sugerido (negociar)"],
     ["PMP_Base", "PMP Base"],
+    ["PMP_2026_REF", "PMP 2026"],
     ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
     ["PMP_diff", "Δ PMP"],
     ["PMP_pct_vs_2026", "% Δ PMP"],
@@ -649,6 +666,9 @@ function downloadExcelCompleto(rows) {
     ["Utilidad_2026", `Utilidad (PMP − Costo) ${CURRENT_SOURCE}`],
     ["Rec", "Recomendación"],
     ["RecUtil", "Recomendaciones para mejorar la utilidad"],
+    ["Costo_Intermedio", "Costo intermedio (entre menor y mayor)"],
+    ["Utilidad_Intermedio_pct", "% utilidad (costo intermedio vs PMP 2026)"],
+    ["RecUtilInter", "Recomendación utilidad (costo intermedio)"],
   ];
 
   const header = cols.map(([_, title]) => `<th>${escHtml(title)}</th>`).join("");
@@ -657,12 +677,13 @@ function downloadExcelCompleto(rows) {
       let v;
       if (key === "Rec") v = rowRecommendation(r);
       else if (key === "RecUtil") v = rowRecommendationUtilidad(r);
+      else if (key === "RecUtilInter") v = rowRecommendationUtilidadIntermedio(r);
       else if (key === "Utilidad_2026") {
         const p = safeNumber(r.PMP_2026);
         const c = safeNumber(r.Costo_2026);
         v = (p !== null && c !== null) ? (p - c) : null;
       }
-      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026") v = pct(r[key]);
+      else if (key === "Costo_pct_vs_2026" || key === "PMP_pct_vs_2026" || key === "Utilidad_Intermedio_pct") v = pct(r[key]);
       else v = r[key];
 
       const n = safeNumber(v);
@@ -1036,6 +1057,7 @@ const BASE_BY_NAME = (() => {
 })();
 // Fuentes de comparación (se cargan desde ./data/manifest.json)
 let SOURCES = {};
+let PMP2026 = new Map();
 let CURRENT_SOURCE = null;
 let CURRENT_DATA = DATA;
 
@@ -1192,6 +1214,7 @@ function setCompLabel(label){
 // Calcula mejor precio mercado (mínimo) entre todas las fuentes disponibles
 function marketBestForEAN(ean){
   let bestCosto = null, bestCostoSrc = null;
+  let worstCosto = null;
   let bestPmp = null, bestPmpSrc = null;
 
   Object.keys(SOURCES).forEach(src=>{
@@ -1201,10 +1224,11 @@ function marketBestForEAN(ean){
     const c = toNum(v.costo);
     const p = toNum(v.pmp);
     if (c !== null && (bestCosto === null || c < bestCosto)) { bestCosto = c; bestCostoSrc = src; }
+    if (c !== null && (worstCosto === null || c > worstCosto)) { worstCosto = c; }
     if (p !== null && (bestPmp === null || p < bestPmp)) { bestPmp = p; bestPmpSrc = src; }
   });
 
-  return {bestCosto, bestCostoSrc, bestPmp, bestPmpSrc};
+  return {bestCosto, bestCostoSrc, worstCosto, bestPmp, bestPmpSrc};
 }
 
 // Construye CURRENT_DATA a partir del BASE + fuente seleccionada
@@ -1231,15 +1255,32 @@ function buildDataForSource(sourceKey){
     const Margen_Base = toNum(b.Margen_Base);
     const Margen_2026 = (PMP_2026 !== null && Costo_2026 !== null && PMP_2026) ? ((PMP_2026 - Costo_2026) / PMP_2026) : null;
 
-    const mk = String(ean).startsWith("N:") ? {bestCosto:null,bestCostoSrc:"",bestPmp:null,bestPmpSrc:""} : marketBestForEAN(ean);
+    const mk = String(ean).startsWith("N:") ? {bestCosto:null,bestCostoSrc:"",worstCosto:null,bestPmp:null,bestPmpSrc:""} : marketBestForEAN(ean);
     const Mejor_Costo_Mercado = mk.bestCosto;
     const Fuente_Mejor_Costo = mk.bestCostoSrc;
+    const Costo_Mas_Caro_Mercado = mk.worstCosto;
     const Mejor_PMP_Mercado = mk.bestPmp;
     const Fuente_Mejor_PMP = mk.bestPmpSrc;
 
-    // sugerido = mejor mercado (mínimo disponible)
+    // PMP 2026 (FESA) para referencia
+    const PMP_2026_REF = String(ean).startsWith("N:") ? null : toNum(PMP2026?.get?.(ean));
+
+    // sugerido = mejor mercado (mínimo disponible). Para PMP, usa como techo el PMP 2026 si existe.
     const Costo_Sugerido = Mejor_Costo_Mercado;
-    const PMP_Sugerido = Mejor_PMP_Mercado;
+    let PMP_Sugerido = Mejor_PMP_Mercado;
+    if (PMP_2026_REF !== null){
+      if (PMP_Sugerido === null) PMP_Sugerido = PMP_2026_REF;
+      else PMP_Sugerido = Math.min(PMP_Sugerido, PMP_2026_REF);
+    }
+
+    // Costo intermedio entre el menor (negociar) y el mayor (mercado)
+    const Costo_Intermedio = (Costo_Sugerido !== null && Costo_Mas_Caro_Mercado !== null)
+      ? ((Costo_Sugerido + Costo_Mas_Caro_Mercado) / 2)
+      : null;
+
+    const Utilidad_Intermedio_pct = (PMP_2026_REF !== null && Costo_Intermedio !== null && PMP_2026_REF)
+      ? ((PMP_2026_REF - Costo_Intermedio) / PMP_2026_REF)
+      : null;
 
     rows.push({
       EAN: ean,
@@ -1254,6 +1295,9 @@ function buildDataForSource(sourceKey){
       Fuente_Mejor_PMP,
       Costo_Sugerido,
       PMP_Sugerido,
+      PMP_2026_REF,
+      Costo_Intermedio,
+      Utilidad_Intermedio_pct,
     });
   });
 
@@ -1574,6 +1618,7 @@ async function loadExternalWorkbook(){
         }
       }
       populateSourceSelect();
+      await loadPmp2026();
       setHint(`Listas cargadas: ${Object.keys(SOURCES).length}.`);
       return;
     }
@@ -1608,10 +1653,30 @@ async function loadExternalWorkbook(){
     });
 
     populateSourceSelect();
+    await loadPmp2026();
     setHint(`Listas cargadas: ${Object.keys(SOURCES).length}.`);
   }catch(err){
     console.warn(err);
     setHint("Error leyendo el Excel. Usando listas JSON.");
+  }
+}
+
+
+async function loadPmp2026(){
+  try{
+    const res = await fetch("./data/pmp_2026.json", {cache:"no-store"});
+    if (!res.ok) return;
+    const js = await res.json();
+    const rows = (js && js.rows) ? js.rows : [];
+    const m = new Map();
+    for (const r of rows){
+      const k = normEAN(r.ean);
+      if (!k || m.has(k)) continue;
+      m.set(k, toNum(r.pmp));
+    }
+    PMP2026 = m;
+  }catch(err){
+    console.warn("PMP 2026 load failed:", err);
   }
 }
 
