@@ -1218,6 +1218,9 @@ function marketBestForEAN(ean){
   let bestPmp = null, bestPmpSrc = null;
 
   Object.keys(SOURCES).forEach(src=>{
+    // La lista universal solo sirve como vista global;
+    // no se considera como fuente original para no duplicar/contaminar el mejor mercado.
+    if (String(src).toUpperCase().includes("UNIVERSAL")) return;
     const m = SOURCES[src];
     const v = m?.get?.(ean);
     if (!v) return;
