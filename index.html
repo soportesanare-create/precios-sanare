@@ -582,12 +582,12 @@ function downloadExcelIncrementos(rows) {
     ["EAN", "EAN"],
     ["Articulo", "Artículo"],
     ["Costo_Base", "Costo Base"],
-    ["Costo_2026", "Costo 2026"],
+    ["Costo_2026", costColumnTitle()],
     ["Costo_diff", "Δ Costo"],
     ["Costo_pct_vs_2026", "% Δ Costo"],
     ["PMP_Base", "PMP Base"],
     ["PMP_2026_REF", "PMP 2026"],
-    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
+    ["PMP_2026", pmpColumnTitle()],
     ["PMP_diff", "Δ PMP"],
     ["PMP_pct_vs_2026", "% Δ PMP"],
     ["Margen_Base", "Margen Base"],
@@ -647,18 +647,18 @@ function downloadExcelCompleto(rows) {
     ["EAN", "EAN"],
     ["Articulo", "Artículo"],
     ["Costo_Base", "Costo Base"],
-    ["Costo_2026", `Costo ${CURRENT_SOURCE}`],
+    ["Costo_2026", costColumnTitle()],
     ["Costo_diff", "Δ Costo"],
     ["Costo_pct_vs_2026", "% Δ Costo"],
-    ["Mejor_Costo_Mercado", "Mejor Costo Mercado"],
+    ["Mejor_Costo_Mercado", bestCostColumnTitle()],
     ["Fuente_Mejor_Costo", "Fuente (Mejor Costo)"],
     ["Costo_Sugerido", "Costo sugerido (negociar)"],
     ["PMP_Base", "PMP Base"],
     ["PMP_2026_REF", "PMP 2026"],
-    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
+    ["PMP_2026", pmpColumnTitle()],
     ["PMP_diff", "Δ PMP"],
     ["PMP_pct_vs_2026", "% Δ PMP"],
-    ["Mejor_PMP_Mercado", "Mejor PMP Mercado"],
+    ["Mejor_PMP_Mercado", bestPmpColumnTitle()],
     ["Fuente_Mejor_PMP", "Fuente (Mejor PMP)"],
     ["PMP_Sugerido", "PMP sugerido (negociar)"],
     ["Margen_Base", "Margen Base"],
@@ -814,7 +814,7 @@ function initTable() {
       {title:"EAN", field:"EAN", width: 140, headerFilter:"input"},
       {title:"Artículo", field:"Articulo", widthGrow: 3, headerFilter:"input"},
       {title:"Costo Base", field:"Costo_Base", hozAlign:"right", formatter:(c)=>money(c.getValue())},
-      {title:"Costo 2026", field:"Costo_2026", hozAlign:"right", formatter:(c)=>money(c.getValue())},
+      {title: costColumnTitle(), field:"Costo_2026", hozAlign:"right", formatter:(c)=>money(c.getValue())},
       {title:"Δ Costo", field:"Costo_diff", hozAlign:"right",
         formatter:(c)=> {
           const v = safeNumber(c.getValue());
@@ -832,7 +832,7 @@ function initTable() {
         }
       },
       {title:"PMP Base", field:"PMP_Base", hozAlign:"right", formatter:(c)=>money(c.getValue())},
-      {title:"PMP 2026", field:"PMP_2026", hozAlign:"right", formatter:(c)=>money(c.getValue())},
+      {title: pmpColumnTitle(), field:"PMP_2026", hozAlign:"right", formatter:(c)=>money(c.getValue())},
       {title:"Δ PMP", field:"PMP_diff", hozAlign:"right",
         formatter:(c)=> {
           const v = safeNumber(c.getValue());
@@ -902,12 +902,12 @@ function initCharts() {
     x: scatterX,
     y: scatterY,
     text: scatterT,
-    hovertemplate: "%{text}<br>Costo 2026=%{x:.2f}<br>% Δ Costo=%{y:.2f}%<extra></extra>",
+    hovertemplate: `%{text}<br>${costColumnTitle()}=%{x:.2f}<br>% Δ Costo=%{y:.2f}%<extra></extra>`,
     marker: { size: 6, opacity: 0.8 },
   }], {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    xaxis: { title: "Costo 2026", gridcolor: "rgba(255,255,255,.08)", type: "log" },
+    xaxis: { title: costColumnTitle(), gridcolor: "rgba(255,255,255,.08)", type: "log" },
     yaxis: { title: "% Δ Costo", gridcolor: "rgba(255,255,255,.08)" },
     margin: {l: 50, r: 10, t: 10, b: 45},
     font: {color: "white"},
@@ -1195,6 +1195,26 @@ function populateSourceSelect(){
   if (CURRENT_SOURCE) sel.value = CURRENT_SOURCE;
 }
 
+function isUniversalSource(sourceKey = CURRENT_SOURCE){
+  return String(sourceKey || "").toUpperCase().includes("UNIVERSAL");
+}
+
+function costColumnTitle(){
+  return isUniversalSource() ? "Costo UNIVERSAL - TODAS LAS LISTAS (COSTO INTERMEDIO ENTRE MÍNIMO Y MÁXIMO DE LAS LISTAS)" : `Costo ${CURRENT_SOURCE}`;
+}
+
+function pmpColumnTitle(){
+  return isUniversalSource() ? "PMP UNIVERSAL - TODAS LAS LISTAS (PMP MAXIMO DE LAS LISTAS)" : `PMP ${CURRENT_SOURCE}`;
+}
+
+function bestCostColumnTitle(){
+  return isUniversalSource() ? "Mejor Costo Mercado (COSTO MINIMO DE LAS LISTAS)" : "Mejor Costo Mercado";
+}
+
+function bestPmpColumnTitle(){
+  return isUniversalSource() ? "Mejor PMP Mercado (PMP MINIMO DE LAS LISTAS)" : "Mejor PMP Mercado";
+}
+
 function setCompLabel(label){
   const ids = ["labelComp","labelComp2","labelComp3","labelCompChip","labelComp4","labelCompCost","labelCompPmp"];
   ids.forEach(id=>{
@@ -1205,8 +1225,8 @@ function setCompLabel(label){
   // actualiza títulos de columnas en Tabulator
   if (table) {
     try{
-      table.updateColumnDefinition("Costo_2026", {title:`Costo ${label}`});
-      table.updateColumnDefinition("PMP_2026", {title:`PMP ${label}`});
+      table.updateColumnDefinition("Costo_2026", {title: costColumnTitle()});
+      table.updateColumnDefinition("PMP_2026", {title: pmpColumnTitle()});
     }catch(e){}
   }
 }
@@ -1246,8 +1266,20 @@ function buildDataForSource(sourceKey){
     const Costo_Base = toNum(b.Costo_Base);
     const PMP_Base = toNum(b.PMP_Base);
 
-    const Costo_2026 = toNum(comp?.costo);
-    const PMP_2026 = toNum(comp?.pmp);
+    const universal = isUniversalSource(sourceKey);
+    const costoMinUniversal = toNum(comp?.costo_minimo);
+    const costoMaxUniversal = toNum(comp?.costo_maximo);
+    const costoIntermedioUniversal = (costoMinUniversal !== null && costoMaxUniversal !== null)
+      ? ((costoMinUniversal + costoMaxUniversal) / 2)
+      : null;
+
+    // Solo para UNIVERSAL - TODAS LAS LISTAS:
+    // el costo deja de ser promedio simple y pasa a ser el punto medio
+    // entre el costo mínimo y el costo máximo detectado en las listas.
+    const Costo_2026 = universal
+      ? (costoIntermedioUniversal ?? toNum(comp?.costo_promedio) ?? toNum(comp?.costo))
+      : toNum(comp?.costo);
+    const PMP_2026 = universal ? (toNum(comp?.pmp_maximo) ?? toNum(comp?.pmp)) : toNum(comp?.pmp);
 
     const Costo_diff = (Costo_Base !== null && Costo_2026 !== null) ? (Costo_Base - Costo_2026) : null;
     const Costo_pct_vs_2026 = (Costo_diff !== null && Costo_2026) ? (Costo_diff / Costo_2026) : null;
@@ -1259,11 +1291,21 @@ function buildDataForSource(sourceKey){
     const Margen_2026 = (PMP_2026 !== null && Costo_2026 !== null && PMP_2026) ? ((PMP_2026 - Costo_2026) / PMP_2026) : null;
 
     const mk = String(ean).startsWith("N:") ? {bestCosto:null,bestCostoSrc:"",worstCosto:null,bestPmp:null,bestPmpSrc:""} : marketBestForEAN(ean);
-    const Mejor_Costo_Mercado = mk.bestCosto;
-    const Fuente_Mejor_Costo = mk.bestCostoSrc;
-    const Costo_Mas_Caro_Mercado = mk.worstCosto;
-    const Mejor_PMP_Mercado = mk.bestPmp;
-    const Fuente_Mejor_PMP = mk.bestPmpSrc;
+    const Mejor_Costo_Mercado = universal
+      ? (toNum(comp?.costo_minimo) ?? mk.bestCosto)
+      : mk.bestCosto;
+    const Fuente_Mejor_Costo = universal
+      ? (comp?.fuente_mejor_costo || mk.bestCostoSrc)
+      : mk.bestCostoSrc;
+    const Costo_Mas_Caro_Mercado = universal
+      ? (toNum(comp?.costo_maximo) ?? mk.worstCosto)
+      : mk.worstCosto;
+    const Mejor_PMP_Mercado = universal
+      ? (toNum(comp?.pmp_minimo) ?? mk.bestPmp)
+      : mk.bestPmp;
+    const Fuente_Mejor_PMP = universal
+      ? (comp?.fuente_mejor_pmp || mk.bestPmpSrc)
+      : mk.bestPmpSrc;
 
     // PMP 2026 (FESA) para referencia
     const PMP_2026_REF = String(ean).startsWith("N:") ? null : toNum(PMP2026?.get?.(ean));
@@ -1516,17 +1558,17 @@ function downloadExcelIncrementos(rows) {
     ["EAN", "EAN"],
     ["Articulo", "Artículo"],
     ["Costo_Base", "Costo Base"],
-    ["Costo_2026", `Costo ${CURRENT_SOURCE}`],
+    ["Costo_2026", costColumnTitle()],
     ["Costo_diff", "Δ Costo"],
     ["Costo_pct_vs_2026", "% Δ Costo"],
-    ["Mejor_Costo_Mercado", "Mejor Costo Mercado"],
+    ["Mejor_Costo_Mercado", bestCostColumnTitle()],
     ["Fuente_Mejor_Costo", "Fuente (Mejor Costo)"],
     ["Costo_Sugerido", "Costo sugerido (negociar)"],
     ["PMP_Base", "PMP Base"],
-    ["PMP_2026", `PMP ${CURRENT_SOURCE}`],
+    ["PMP_2026", pmpColumnTitle()],
     ["PMP_diff", "Δ PMP"],
     ["PMP_pct_vs_2026", "% Δ PMP"],
-    ["Mejor_PMP_Mercado", "Mejor PMP Mercado"],
+    ["Mejor_PMP_Mercado", bestPmpColumnTitle()],
     ["Fuente_Mejor_PMP", "Fuente (Mejor PMP)"],
     ["PMP_Sugerido", "PMP sugerido (negociar)"],
     ["Margen_Base", "Margen Base"],
@@ -1607,7 +1649,15 @@ async function loadExternalWorkbook(){
             costo: toNum(r.costo),
             pmp: toNum(r.pmp),
             articulo: r.articulo ? String(r.articulo) : "",
-            laboratorio: r.laboratorio ? String(r.laboratorio) : ""
+            laboratorio: r.laboratorio ? String(r.laboratorio) : "",
+            costo_promedio: toNum(r.costo_promedio),
+            costo_minimo: toNum(r.costo_minimo),
+            costo_maximo: toNum(r.costo_maximo),
+            pmp_maximo: toNum(r.pmp_maximo),
+            pmp_minimo: toNum(r.pmp_minimo),
+            fuente_mejor_costo: r.fuente_mejor_costo ? String(r.fuente_mejor_costo) : "",
+            fuente_mejor_pmp: r.fuente_mejor_pmp ? String(r.fuente_mejor_pmp) : "",
+            fuente_pmp_maximo: r.fuente_pmp_maximo ? String(r.fuente_pmp_maximo) : ""
           });
         }
         if (m.size){
