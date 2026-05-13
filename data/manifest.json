@@ -1,1 +1,54 @@
-{"generated_from":"COMPARATIVO MEDICAMENTOS (OFICIAL) BASE FINAL ASEG.xlsx","sources":[{"label":"NADRO MAR","file":"./data/nadro_mar.json"},{"label":"DEMSA MAR","file":"./data/demsa_mar.json"},{"label":"RENAVITA FEB","file":"./data/renavita_feb.json"},{"label":"MEDMONT FEB","file":"./data/medmont_feb.json"},{"label":"UNIMEDICAL MAR","file":"./data/unimedical_mar.json"},{"label":"EMBIOMED","file":"./data/embiomed.json"},{"label":"DROGAS Y ENSERES MAR","file":"./data/drogas_y_enseres_mar.json"},{"label":"PROBEMEDIC","file":"./data/probemedic.json"},{"label":"FARMACIAS VIDA","file":"./data/farmacias_vida.json"},{"label":"MCC","file":"./data/mcc.json"},{"label":"PHARMATYCSA 2026","file":"./data/pharmatycsa_2026.json"},{"label":"UNIVERSAL - TODAS LAS LISTAS","file":"./data/universal_todas_las_listas.json"}],"universal":{"label":"UNIVERSAL - TODAS LAS LISTAS","file":"./data/universal_todas_las_listas.json","dedupe":"Por EAN; si no hay EAN, por nombre normalizado. Costo universal = costo promedio de las listas; Mejor Costo Mercado = costo mínimo de las listas; PMP universal = PMP máximo de las listas; Mejor PMP Mercado = PMP mínimo de las listas."}}
+{
+  "generated_from": "COMPARATIVO MEDICAMENTOS (OFICIAL) BASE FINAL ASEG.xlsx",
+  "sources": [
+    {
+      "label": "NADRO MAR",
+      "file": "./data/nadro_mar.json"
+    },
+    {
+      "label": "DEMSA MAR",
+      "file": "./data/demsa_mar.json"
+    },
+    {
+      "label": "RENAVITA FEB",
+      "file": "./data/renavita_feb.json"
+    },
+    {
+      "label": "MEDMONT FEB",
+      "file": "./data/medmont_feb.json"
+    },
+    {
+      "label": "UNIMEDICAL MAR",
+      "file": "./data/unimedical_mar.json"
+    },
+    {
+      "label": "EMBIOMED",
+      "file": "./data/embiomed.json"
+    },
+    {
+      "label": "DROGAS Y ENSERES MAR",
+      "file": "./data/drogas_y_enseres_mar.json"
+    },
+    {
+      "label": "PROBEMEDIC",
+      "file": "./data/probemedic.json"
+    },
+    {
+      "label": "FARMACIAS VIDA",
+      "file": "./data/farmacias_vida.json"
+    },
+    {
+      "label": "MCC",
+      "file": "./data/mcc.json"
+    },
+    {
+      "label": "UNIVERSAL - TODAS LAS LISTAS",
+      "file": "./data/universal_todas_las_listas.json"
+    }
+  ],
+  "universal": {
+    "label": "UNIVERSAL - TODAS LAS LISTAS",
+    "file": "./data/universal_todas_las_listas.json",
+    "dedupe": "Por EAN; si no hay EAN, por nombre normalizado. Excluye Medpharma y PHARMATYCSA 2026. Costo universal = punto medio entre costo mínimo y máximo; Mejor Costo Mercado = costo mínimo; PMP universal = PMP máximo; Mejor PMP Mercado = PMP mínimo."
+  }
+}

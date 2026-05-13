@@ -12,3 +12,6 @@ PROBEMEDIC: 566 registros
 FARMACIAS VIDA: 756 registros
 MCC: 38 registros
 PHARMATYCSA 2026: 96 registros
+
+
+Actualización: se retiró PHARMATYCSA 2026 del selector y se recalculó UNIVERSAL - TODAS LAS LISTAS sin esa fuente. Medpharma continúa fuera del análisis.
